@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "snakemake-log-viewer"
+version = "0.1.0"
+authors = [
+  {name = "Jared Lumpe", email = "jared@jaredlumpe.com"},
+]
+description = "View Snakemake logs exported in JSON format."
+readme = "README.md"
+
+
+requires-python = ">=3.12"
+dependencies = [
+	"snakemake-logger-plugin-json",
+	"textual",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/jlumpe/snakemake-log-viewer"
+# Repository = "https://github.com/jlumpe/snakemake-log-viewer"
