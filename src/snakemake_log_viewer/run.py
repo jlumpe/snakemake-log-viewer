@@ -1,11 +1,19 @@
 from typing import Any
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from functools import singledispatchmethod
 from uuid import UUID
+from enum import StrEnum, auto
 
 from snakemake_logger_plugin_json import models
+
+
+class JobStatus(StrEnum):
+	pending = auto()
+	running = auto()
+	completed = auto()
+	failed = auto()
 
 
 @dataclass
@@ -18,7 +26,7 @@ class JobInfo:
 	input: list[str] | None = None
 	output: list[str] | None = None
 	log: list[str] | None = None
-	benchmark: list[str] | None = None
+	benchmark: str | None = None
 	# rule_msg: str | None = None
 	wildcards: dict[str, Any] | None = None
 	reason: str | None = None
@@ -30,8 +38,24 @@ class JobInfo:
 	finished: datetime | None = None
 	logs: list[models.SnakemakeLogRecord] = field(default_factory=list)
 
+	@property
+	def status(self) -> JobStatus:
+		if self.finished is not None:
+			return JobStatus.completed
+		elif self.started is not None:
+			return JobStatus.running
+		else:
+			return JobStatus.pending
+
+	@property
+	def duration(self) -> timedelta | None:
+		if self.finished is None:
+			return None
+		return timedelta() if self.started is None else self.finished - self.started
+
 	@staticmethod
 	def from_record(record: models.JobInfoRecord) -> 'JobInfo':
+		"""Create from job_info record."""
 		return JobInfo(
 			id=record.jobid,
 			rule_name=record.rule_name,
@@ -48,7 +72,7 @@ class JobInfo:
 
 
 @dataclass(kw_only=True, repr=False)
-class RunStatus:
+class RunData:
 
 	started: datetime
 	finished: datetime | None = None
@@ -128,5 +152,5 @@ class RunStatus:
 		raise NotImplementedError()
 
 	@staticmethod
-	def load_json(data: dict[str, Any]) -> 'RunStatus':
+	def load_json(data: dict[str, Any]) -> 'RunData':
 		raise NotImplementedError()

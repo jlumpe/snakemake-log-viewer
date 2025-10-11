@@ -20,6 +20,10 @@ dependencies = [
 ]
 
 
+[project.scripts]
+snakemake-log-viewer = "snakemake_log_viewer.cli:main"
+
+
 [project.urls]
 Homepage = "https://github.com/jlumpe/snakemake-log-viewer"
 # Repository = "https://github.com/jlumpe/snakemake-log-viewer"

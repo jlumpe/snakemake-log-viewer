@@ -1,62 +1,119 @@
 LogfileApp {
-	TabbedContent {
-		height: 1fr;
+	# height: 1fr;
 
-		TabPane {
-			# width: 100%;
-			height: 1fr;
+	& > * > TabbedContent {
+		# border: round green;
+		# height: 1fr;
+		# height: 30;
+
+		& > * > TabPane {
 			# border: round yellow;
-
-			DataTable {
-				# border: round green;
-				# width: 100%;
-				# max-width: 80%;
-				# width: 50;
-				overflow-x: hidden;
-			}
+			# width: 100%;
+			# height: 1fr;
+			# border: round yellow;
 		}
 	}
 }
 
 
-TabPane#log {
-	DataTable {
+/* ---------------------------------------------------------------------------------------------- */
+/*                                           Log screen                                           */
+/* ---------------------------------------------------------------------------------------------- */
+
+LogScreen {
+	DataTable#logs-table {
 		width: 1fr;
+		# max-width: 100%;
+		overflow-x: hidden;
 	}
 	LogDetails {
-		width: 1fr;
+		width: 40%;
 	}
 }
 
 
+$logdetails-border-default: grey;
+$logdetails-border-info: grey;
+$logdetails-border-warning: $warning;
+$logdetails-border-error: $error;
+
+
 LogDetails {
-	border: panel grey;
 	padding-top: 1;
+	overflow-y: scroll;
+	# background: $boost;
 
-	&.record-info {
-		# border: panel white;
-	}
-	&.record-warning {
-		border: panel $warning;
-	}
-	&.record-error {
-		border: panel $error;
-	}
-	&.record-critical {
-		border: panel $error;
-	}
-
-	* {
+	& > * {
 		width: 100%;
-		# width: 1fr;
+		# overflow-y: hidden;
 	}
 
 	#message {
-		border: solid grey;
-		# width: 100%;
+		margin: 1 0;
+		padding: 1 1;
+		background: $boost;
 	}
 
-	# Pretty {
-	# 	border: solid grey;
-	# }
+	# Border colors
+	border: panel $logdetails-border-default;
+	# keyline: thin $logdetails-border-default;
+
+	&.record-info {
+		border: panel $logdetails-border-info;
+		# keyline: thin $logdetails-border-info;
+	}
+	&.record-warning {
+		border: panel $logdetails-border-warning;
+		# keyline: thin $logdetails-border-warning;
+	}
+	&.record-error {
+		border: panel $logdetails-border-error;
+		# keyline: thin $logdetails-border-error;
+	}
+	&.record-critical {
+		border: panel $logdetails-border-error;
+		# keyline: thin $logdetails-border-error;
+	}
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                           Jobs screen                                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+JobScreen {
+	DataTable#jobs-table {
+		width: 1fr;
+		# max-width: 100%;
+		overflow-x: hidden;
+	}
+	JobDetails {
+		width: 40%;
+	}
+}
+
+
+$jobdetails-border-default: grey;
+$jobdetails-border-pending: grey;
+$jobdetails-border-running: white;
+$jobdetails-border-completed: $success;
+$jobdetails-border-error: $error;
+
+
+JobDetails {
+
+	# Border colors
+	border: panel $jobdetails-border-default;
+
+	&.record-pending {
+		border: panel $jobdetails-border-pending;
+	}
+	&.record-running {
+		border: panel $jobdetails-border-running;
+	}
+	&.record-completed {
+		border: panel $jobdetails-border-completed;
+	}
+	&.record-error {
+		border: panel $jobdetails-border-error;
+	}
 }

@@ -1,10 +1,10 @@
-from datetime import timedelta
 import os
 from typing import Any
-import logging
+import dataclasses
 
 from textual.app import App, ComposeResult
-from textual.containers import HorizontalGroup, VerticalGroup, VerticalScroll
+from textual.containers import Horizontal, Vertical, Container
+from textual import containers
 from textual import widgets
 from textual.widget import Widget
 from textual.widgets import (
@@ -12,120 +12,60 @@ from textual.widgets import (
 )
 from textual.style import Style
 from textual.content import Content
-from textual.reactive import reactive
+from textual.reactive import reactive, var
 from rich.text import Text
+from rich.pretty import Pretty
 
 from snakemake_logger_plugin_json import models
-from snakemake_logger_plugin_json.stuff import RunStatus, JobInfo
-
-
-LEVELS = [
-	logging.DEBUG,
-	logging.INFO,
-	logging.WARNING,
-	logging.ERROR,
-	logging.CRITICAL,
-]
-LEVEL_NAMES = list(map(logging.getLevelName, LEVELS))
-
-
-def format_td(td: timedelta) -> str:
-	secs = td.total_seconds()
-	if secs < 0:
-		neg = True
-		secs = -secs
-	else:
-		neg = False
-
-	secs = int(secs)
-	mins, secs = divmod(secs, 60)
-	hours, mins = divmod(mins, 60)
-
-	s = f'{hours:d}:{mins:02d}:{secs:02d}'
-	if neg:
-		s = '-' + s
-	return s
-
-
-# ---------------------------------------------------------------------------- #
-#                                    Widgets                                   #
-# ---------------------------------------------------------------------------- #
-
-
-class StaticTable(DataTable):
-
-	def __init__(self, items: list[tuple[Any, Any]] | None = None):
-		super().__init__(
-			show_header=False,
-			show_cursor=False,
-		)
-		super().add_column('Value', key='value')
-
-		if items is not None:
-			for label, value in items:
-				self.add_item(label, value)
-
-	def add_item(self, label, value, key=None, *, height: int | None = 1):
-		super().add_row(value, label=label, key=key, height=height)
-
-	def add_column(self, *args, **kw):
-		raise RuntimeError('Not allowed')
-
-	def add_row(self, *args, **kw):
-		raise RuntimeError('Not allowed')
+from snakemake_logger_plugin_json.models import JsonLogRecord, SnakemakeLogRecord
+from .run import RunData, JobInfo
+from .util import LEVELS_DICT, get_level_name, format_td
+from .textual import KVTable
 
 
 # ---------------------------------------------------------------------------- #
 #                                  Log screen                                  #
 # ---------------------------------------------------------------------------- #
 
-class LogDetails(VerticalScroll):
+class LogDetails(Vertical):
 
-	record: reactive[models.JsonLogRecord | None] = reactive(None, recompose=True)
-	rundata: RunStatus
+	rundata: RunData
+	record: var[JsonLogRecord | None] = var(None)
 
-	def __init__(self, rundata: RunStatus):
+	def __init__(self, rundata: RunData):
 		super().__init__()
 		self.rundata = rundata
 
 	def compose(self) -> ComposeResult:
-		self._update_class()
+		yield KVTable(id='log-attrs')
+		yield Label('', id='message')
+		yield KVTable(id='log-attrs-additional')
 
-		if self.record is None:
+	def watch_record(self, record: JsonLogRecord | None) -> None:
+		basic_table = self.query_one('#log-attrs', KVTable)
+		addl_table = self.query_one('#log-attrs-additional', KVTable)
+		message = self.query_one('#message', Label)
+
+		basic_table.clear()
+		addl_table.clear()
+
+		if record is None:
 			self.border_title = None
-			yield widgets.Static('No record selected')
-			return
+			self.set_classes('record-none')
+			message.content = ''
 
-		self.border_title = self.record.levelname or '?'
-
-		# Basic attrs
-		yield self._make_basic_table(self.record)
-
-		# Message
-		yield Label(self.record.message or '', id='message')
-
-		# Additional
-		addl = self._make_additional_data(self.record)
-		if addl:
-			yield addl
-
-	def _update_class(self) -> None:
-		classes = []
-		if self.record is None:
-			classes.append('record-none')
-		elif self.record.levelname in LEVEL_NAMES:
-			classes.append('record-' + self.record.levelname.lower())
 		else:
-			classes.append('record-other')
+			self.border_title = get_level_name(record, '?', '?').upper()
+			self.set_classes([
+				'record-' + get_level_name(record, 'other', 'other'),
+				'record-' + record.type,
+			])
+			message.content = record.message or ''
 
-		if self.record is not None:
-			classes.append('record-' + self.record.type)
+			self._populate_basic(basic_table, record)
+			self._populate_addl(addl_table, record)
 
-		self.set_classes(classes)
-
-	def _make_basic_table(self, record: models.JsonLogRecord) -> StaticTable:
-		table = StaticTable()
-
+	def _populate_basic(self, table: KVTable, record: JsonLogRecord) -> None:
 		time = record.created_dt - self.rundata.started
 		table.add_item('Time', format_td(time))
 
@@ -138,26 +78,17 @@ class LogDetails(VerticalScroll):
 			if jobs:
 				table.add_item('Jobs', ' '.join(map(str, sorted(jobs))))
 
-		return table
-
-	def _make_additional_data(self, record: models.JsonLogRecord) -> Widget | None:
+	def _populate_addl(self, table: KVTable, record: JsonLogRecord) -> None:
 		if isinstance(record, models.StandardLogRecord):
-			return None
-
-		attrs = dict()
-
-		import dataclasses
+			return
 
 		record_fields = set(field.name for field in dataclasses.fields(type(record)))
-		base_fields = set(field.name for field in dataclasses.fields(models.JsonLogRecord))
+		base_fields = set(field.name for field in dataclasses.fields(JsonLogRecord))
 		fields = record_fields - base_fields
 		fields -= {'jobid', 'job_id', 'job_ids', 'jobs'}
 
 		if not fields:
 			return None
-
-		table = StaticTable()
-		from rich.pretty import Pretty
 
 		for name in fields:
 			value = getattr(record, name)
@@ -169,10 +100,8 @@ class LogDetails(VerticalScroll):
 				value = Pretty(value)
 			table.add_item(name, value, height=None)
 
-		return table
 
-
-class LogScreen(HorizontalGroup):
+class LogScreen(Horizontal):
 
 	_COLUMNS: list[tuple[str, str, int]] = [
 		('time', 'Time', 8),
@@ -181,23 +110,26 @@ class LogScreen(HorizontalGroup):
 		('message', 'Message', 10),
 	]
 
-	rundata: RunStatus
+	BINDINGS = [
+		('p', 'toggle_panel()', 'Toggle side panel'),
+	]
 
-	def __init__(self, rundata: RunStatus):
+	rundata: RunData
+
+	def __init__(self, rundata: RunData):
 		super().__init__()
 		self.rundata = rundata
 
 	def compose(self) -> ComposeResult:
-		yield DataTable(
-			cursor_type='row',
-		)
-		details = LogDetails(self.rundata)
-		details.record = self.rundata.logs[0]
-		yield details
+		with Container():
+			yield DataTable(
+				id='logs-table',
+				cursor_type='row',
+			)
+		yield LogDetails(self.rundata)
 
 	def on_mount(self) -> None:
-		table: DataTable = self.query_one(DataTable)
-		# table: ResizingDataTable = self.query_one(ResizingDataTable)
+		table: DataTable = self.query_one('#logs-table', DataTable)
 		table.show_horizontal_scrollbar = False
 
 		for key, label, width in self._COLUMNS:
@@ -210,28 +142,34 @@ class LogScreen(HorizontalGroup):
 		for i, record in enumerate(self.rundata.logs):
 			self._add_row(table, record, i)
 
-	def _add_row(self, table: DataTable, record: models.JsonLogRecord, i: int):
-		event = getattr(record, 'event', None)
-		style = Style()
-
-		time = record.created_dt - self.rundata.started
-
-		if record.levelname == 'INFO':
-			info = Content('i')
-		elif record.levelname in ('ERROR', 'CRITICAL'):
-			style = Style.parse('$text-error bold')
-			info = Content.from_markup('[$error on $error-muted]' + record.levelname[0])
+	def _add_row(self, table: DataTable, record: JsonLogRecord, i: int):
+		if record.levelname == 'CRITICAL':
+			style = Style.parse('$text-error')
+			info = '🛑\uFE0E'
+		elif record.levelname == 'ERROR':
+			style = Style.parse('$text-error')
+			info = '🚫\uFE0E'
 		elif record.levelname == 'WARNING':
 			style = Style.parse('$text-warning')
-			info = Content.from_markup('[bold white on $warning-muted]W')
+			info = '⚠\uFE0E'
+		elif record.levelname == 'INFO':
+			style = Style()
+			# info = 'ℹ\uFE0E'
+			info = 'i '
 		elif record.levelname == 'DEBUG':
 			style = Style.parse('dim')
-			info = Content.styled('d', style)
+			# info = '⚙\uFE0E'
+			info = 'd '
 		else:
-			info = Content('?')
+			style = Style()
+			info = '? '
 
-		time = Text(format_td(time), style.rich_style)
-		message = Text(record.message or '', style=style.rich_style, overflow='ellipsis')
+		event = getattr(record, 'event', None)
+		event = Text(event or '', style=style.rich_style)
+		time = record.created_dt - self.rundata.started
+		time = Text(format_td(time), style=style.rich_style)
+		info = Text(info, style=style.rich_style)
+		message = Text((record.message or '').strip(), style=style.rich_style, overflow='ellipsis')
 
 		table.add_row(
 			time,
@@ -239,10 +177,11 @@ class LogScreen(HorizontalGroup):
 			event,
 			message,
 			key=str(i),
+			# label=str(i),
 		)
 
 	def on_data_table_row_highlighted(self, event: DataTable.RowSelected):
-		details: LogDetails = self.query_one(LogDetails)
+		details = self.query_one(LogDetails)
 		key = event.row_key.value
 
 		if key is None:
@@ -260,16 +199,59 @@ class LogScreen(HorizontalGroup):
 
 		details.record = None
 
+	def action_toggle_panel(self) -> None:
+		details = self.query_one(LogDetails)
+		details.display = not details.display
+
 
 # ---------------------------------------------------------------------------- #
 #                                  Job screen                                  #
 # ---------------------------------------------------------------------------- #
 
-class JobsScreen(HorizontalGroup):
+class JobDetails(Vertical):
 
-	rundata: RunStatus
+	rundata: RunData
+	job: var[JobInfo | None] = var(None)
 
-	def __init__(self, rundata: RunStatus):
+	def __init__(self, rundata: RunData):
+		super().__init__()
+		self.rundata = rundata
+		self.border_title = 'Job'
+
+	def compose(self) -> ComposeResult:
+		yield KVTable(id='job-attrs')
+
+	def watch_job(self, job: JobInfo | None) -> None:
+		table = self.query_one('#job-attrs', KVTable)
+		table.clear()
+
+		if job is None:
+			self.set_classes('job-none')
+
+		else:
+			self.set_classes('job-' + job.status)
+			self._populate_basic(table, job)
+
+	def _populate_basic(self, table: KVTable, job: JobInfo) -> None:
+		table.add_all([
+			('id', str(job.id)),
+			('rule', job.rule_name),
+			('status', job.status),
+			('started', '' if job.started is None else format_td(job.started - self.rundata.started)),
+			('duration', format_td(job.duration, '')),
+		])
+
+
+
+class JobsScreen(Horizontal):
+
+	BINDINGS = [
+		('p', 'toggle_panel()', 'Toggle side panel'),
+	]
+
+	rundata: RunData
+
+	def __init__(self, rundata: RunData):
 		super().__init__()
 		self.rundata = rundata
 
@@ -277,9 +259,10 @@ class JobsScreen(HorizontalGroup):
 		yield DataTable(
 			cursor_type='row',
 		)
+		yield JobDetails(self.rundata)
 
 	def on_mount(self) -> None:
-		table: DataTable = self.query_one(DataTable)
+		table = self.query_one(DataTable)
 		table.add_columns(
 			'Rule',
 			'Started',
@@ -294,7 +277,7 @@ class JobsScreen(HorizontalGroup):
 
 	def _add_row(self, table: DataTable, job: JobInfo):
 		if job.started:
-			started = format_td(job.started - self.rundata.logs[0].created_dt)
+			started = format_td(job.started - self.rundata.started)
 		else:
 			started = ''
 
@@ -311,6 +294,29 @@ class JobsScreen(HorizontalGroup):
 			label=str(job.id),
 		)
 
+	def on_data_table_row_highlighted(self, event: DataTable.RowSelected):
+		details = self.query_one(JobDetails)
+		key = event.row_key.value
+
+		if key is None:
+			details.job = None
+			return
+
+		try:
+			jobid = int(key)
+		except ValueError:
+			pass
+		else:
+			if jobid in self.rundata.jobs:
+				details.job = self.rundata.jobs[jobid]
+				return
+
+		details.job = None
+
+	def action_toggle_panel(self) -> None:
+		details = self.query_one(JobDetails)
+		details.display = not details.display
+
 
 # ---------------------------------------------------------------------------- #
 #                                      App                                     #
@@ -324,9 +330,9 @@ class LogfileApp(App):
 		('j', 'show_tab("jobs")', 'Jobs'),
 	]
 
-	rundata: RunStatus
+	rundata: RunData
 
-	def __init__(self, rundata: RunStatus):
+	def __init__(self, rundata: RunData):
 		super().__init__()
 		self.rundata = rundata
 
@@ -335,13 +341,11 @@ class LogfileApp(App):
 		yield Header()
 		yield Footer()
 
-		with TabbedContent():
+		with TabbedContent(initial='log'):
 			with TabPane('Log', id='log'):
 				yield LogScreen(self.rundata)
 			with TabPane('Jobs', id='jobs'):
 				yield JobsScreen(self.rundata)
-			with TabPane('Test', id='test'):
-				yield widgets.Label('Test')
 
 	def action_show_tab(self, tabid: str) -> None:
 		self.query_one(TabbedContent).active = tabid
