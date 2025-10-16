@@ -15,7 +15,7 @@ readme = "README.md"
 
 requires-python = ">=3.12"
 dependencies = [
-	"snakemake-logger-plugin-json",
+	"snakemake-logger-plugin-json ~=0.1.0",
 	"textual",
 ]
 
